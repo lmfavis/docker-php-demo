@@ -1,4 +1,4 @@
-name: Test, Build, and Push Docker image to ECR
+name: Test, Build, and Deploy to EKS
 
 on:
   push:
@@ -58,3 +58,40 @@ jobs:
       run: |
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+  deploy:
+    name: Deploy to EKS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    # This will set up Kubeconfig depending on the branch/environment
+    # This will either setup the prod cluster or the dev cluster
+    - name: Set up Kubeconfig
+      run: |
+        if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+          echo "Setting up kubeconfig for Prod Cluster"
+          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME_PROD }} --region ${{ secrets.AWS_REGION }}
+        elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+          echo "Setting up kubeconfig for Dev Cluster"
+          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME_DEV }} --region ${{ secrets.AWS_REGION }}
+        fi
+
+    # This will deploy either the prod image or the dev image to the appropriate cluster
+    - name: Update Kubernetes deployment
+      run: |
+        kubectl set image deployment/my-deployment my-container=${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
