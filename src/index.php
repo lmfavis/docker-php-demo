@@ -6,4 +6,3 @@ function getOutput() {
 }
 
 echo getOutput();
-?>
